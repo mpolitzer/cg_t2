@@ -37,9 +37,20 @@ typedef struct _Box Box;
 
 typedef struct _Mesh Mesh;
 
+typedef struct _Btree Btree;
+
+enum {
+	OP_UNION,
+	OP_INTERSECT,
+	OP_DIFF,
+	OP_INTERSECTSP,
+};
+
 /************************************************************************/
 /* Funções Exportadas                                                   */
 /************************************************************************/
+
+Object* objCreateBtree( Object *, Object *, int operation);
 /**
  *	Cria uma esfera.
  *

@@ -174,6 +174,9 @@ Scene* sceLoad( const char *filename )
 	char buffer[512];
 
 	Scene* scene;
+
+	/* indices dos objetos para btree e qual operação será realizada. */
+	int obj1, obj2, op;
 	
 	Color bgColor;
 	Color ambientLight;
@@ -337,7 +340,21 @@ Scene* sceLoad( const char *filename )
 			}
 
 			scene->objects[scene->objectCount++] = objCreateMesh( material, pos1, pos2, buffer );
-		} 
+		}
+		else if( sscanf( buffer, "BTREE %d %d %d\n", &obj1, &obj2, &op ) == 3 )
+		{
+				if( scene->objectCount >= MAX_OBJECTS )
+			{
+				fprintf( stderr, "sceLoad: Foi ultrapassado o limite de definicoes de objetos na cena. Ignorando." );
+				continue;
+			}
+			scene->objects[scene->objectCount++] = objCreateBtree(
+					scene->objects[obj1],
+					scene->objects[obj2],
+					op);
+			scene->objects[obj1] = NULL;
+			scene->objects[obj2] = NULL;
+		}
 		else
 		{			
 			printf( "sceLoad: Ignorando comando:\n %s\n", buffer );

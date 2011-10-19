@@ -34,6 +34,12 @@ struct _Object
 	void *data;
 };
 
+struct _Btree
+{
+	int op;
+	struct _Object *left, *right;
+};
+
 /**
  *   Objeto esfera.
  */
@@ -133,20 +139,36 @@ struct _Mesh
 #define M_PI 3.14159265358979323846
 #endif
 
-
 enum
 {
 	TYPE_UNKNOWN,
 	TYPE_SPHERE,
 	TYPE_TRIANGLE,
 	TYPE_BOX,
-	TYPE_MESH
+	TYPE_MESH,
+	TYPE_BTREE,
 };
-
 
 /************************************************************************/
 /* Definição das Funções Exportadas                                     */
 /************************************************************************/
+
+Object* objCreateBtree(Object *left, Object *right, int op )
+{
+	Object* object;
+	Btree* btree;
+
+	object = (Object *)malloc( sizeof(Object) );
+	btree = (Btree *)malloc( sizeof(Btree) );
+
+	*btree = (Btree){ .left = left, .right = right, .op = op };
+
+	object->type = TYPE_BTREE;
+	object->data = btree;
+
+	return object;
+}
+
 Object* objCreateSphere( int material, const Vector center, double radius )
 {
 	Object* object;
@@ -228,17 +250,18 @@ Object* objCreateMesh( int material, const Vector bottomLeft, const Vector topRi
 	fp = fopen(filename,"rt");
 	if (fp!=NULL) {
 		int i;
+		int dummy;
 		float xm,xM,ym,yM,zm,zM;
 
-		fscanf(fp,"%d",&mesh->nvertices);
+		dummy = fscanf(fp,"%d",&mesh->nvertices);
 		mesh->coord = (float*)malloc(3*mesh->nvertices*sizeof(float));
 		for (i=0;i<mesh->nvertices;i++){
-			fscanf(fp," %f %f %f",&mesh->coord[3*i],&mesh->coord[3*i+1],&mesh->coord[3*i+2]);
+			dummy = fscanf(fp," %f %f %f",&mesh->coord[3*i],&mesh->coord[3*i+1],&mesh->coord[3*i+2]);
 		}
-		fscanf(fp,"%d",&mesh->ntriangles);
+		dummy = fscanf(fp,"%d",&mesh->ntriangles);
 		mesh->triangle=(int*)malloc(3*mesh->ntriangles*sizeof(int));
 		for (i=0;i<mesh->ntriangles;i++){
-			fscanf(fp," %d %d %d",&mesh->triangle[3*i],&mesh->triangle[3*i+1],&mesh->triangle[3*i+2]);
+			dummy = fscanf(fp," %d %d %d",&mesh->triangle[3*i],&mesh->triangle[3*i+1],&mesh->triangle[3*i+2]);
 		}
 		xm=xM=mesh->coord[0]; ym=yM=mesh->coord[1]; zm=zM=mesh->coord[2];
 		for (i=1;i<mesh->nvertices;i++){
@@ -312,10 +335,92 @@ double objMeshIntercept(Mesh* mesh,Vector origin,Vector direction,double distanc
 	return -1.0;
 }
 
+double objInterceptExitW( Object* object, Vector eye, Vector ray )
+{
+	switch (object->type){
+	case TYPE_SPHERE:
+		{
+			Sphere *s = (Sphere *)object->data;
+
+			double a, b, c, delta;
+			double distance = -1.0;
+
+			Vector fromSphereToEye;
+
+			fromSphereToEye = algSub( eye, s->center );
+
+			a = algDot( ray, ray );
+			b = ( 2.0 * algDot( ray, fromSphereToEye ) );
+			c = ( algDot( fromSphereToEye, fromSphereToEye ) - ( s->radius * s->radius ) );
+
+			delta = ( ( b * b ) - ( 4 * a * c ) );
+
+			if( fabs( delta ) <= EPSILON )
+			{
+				distance = ( -b / (2 * a ) );
+			}
+			else if( delta > EPSILON )
+			{
+				double root = sqrt( delta );
+				distance = MAX( ( ( -b + root ) / ( 2 * a ) ), ( ( -b - root ) / ( 2.0 * a ) )  );
+			}
+
+			return distance;
+		}
+	}
+	return 0;
+}
+
 double objIntercept( Object* object, Vector eye, Vector ray )
 {
+	if (!object) return -1;
 	switch( object->type )
 	{
+		Btree *bt;
+		Vector v;
+		double d1, d2, min;
+		double i0, i1, o0, o1;
+	case TYPE_BTREE:
+		bt = (Btree *)object->data;
+		if (bt->op == OP_UNION){
+			d1 = objIntercept( bt->left, eye, ray );
+			d2 = objIntercept( bt->right, eye, ray );
+			min = MIN( d1, d2 );
+			if (min < 0) return MAX( d1, d2 );
+			return min;
+		} else if (bt->op == OP_INTERSECT){
+			i0 = objIntercept( bt->left, eye, ray );
+			i1 = objIntercept( bt->right, eye, ray );
+			o0 = objInterceptExitW( bt->left, eye, ray );
+			o1 = objInterceptExitW( bt->right, eye, ray );
+
+			if ((i0 < i1) && (o0 > i1)) return i1;
+			if ((i1 < i0) && (o1 > i0)) return i0;
+			return -1;
+		} else if (bt->op == OP_DIFF){
+			i0 = objIntercept( bt->left, eye, ray );
+			i1 = objIntercept( bt->right, eye, ray );
+			o0 = objInterceptExitW( bt->left, eye, ray );
+			o1 = objInterceptExitW( bt->right, eye, ray );
+#if 1
+			if (i0 > i1) return i0;
+			if (o0 > i1) return o0;
+#else
+			if (i0 < i1) return i0;
+			if (o1 < o0) return o1;
+#endif
+			return -1;
+		}
+		 else if (bt->op == OP_INTERSECTSP){
+			i0 = objIntercept( bt->left, eye, ray );
+			i1 = objIntercept( bt->right, eye, ray );
+			o0 = algNorm(objInterceptExit( bt->left, eye, ray ));
+			o1 = algNorm(objInterceptExit( bt->right, eye, ray ));
+
+			if ((i0 < i1) && (o0 > i1)) return i1;
+			if ((i1 < i0) && (o1 > i0)) return i0;
+			return -1;
+		}
 	case TYPE_SPHERE:
 		{
 			Sphere *s = (Sphere *)object->data;
@@ -394,12 +499,12 @@ double objIntercept( Object* object, Vector eye, Vector ray )
 			Box *box = (Box *)object->data;
 
 			double xmin = box->bottomLeft.x;
-		    double ymin = box->bottomLeft.y;
-		    double zmin = box->bottomLeft.z;
-		    double xmax = box->topRight.x;
-		    double ymax = box->topRight.y;
-		    double zmax = box->topRight.z;
-			
+			double ymin = box->bottomLeft.y;
+			double zmin = box->bottomLeft.z;
+			double xmax = box->topRight.x;
+			double ymax = box->topRight.y;
+			double zmax = box->topRight.z;
+
 			double x, y, z;
 			double distance = -1.0;
 
@@ -420,8 +525,8 @@ double objIntercept( Object* object, Vector eye, Vector ray )
 				{
 					y = ( eye.y + ( distance * ray.y ) ); 
 					z = ( eye.z + ( distance * ray.z ) ); 
-                    if( ( y >= ymin ) && ( y <= ymax ) && ( z >= zmin ) && ( z <= zmax ) )
-                        return distance;
+					if( ( y >= ymin ) && ( y <= ymax ) && ( z >= zmin ) && ( z <= zmax ) )
+						return distance;
 				}
 			}
 
@@ -437,13 +542,13 @@ double objIntercept( Object* object, Vector eye, Vector ray )
 					y = ymax;
 					distance = ( ( ymax - eye.y ) / ray.y );
 				}
-				
+
 				if( distance > EPSILON )
 				{
 					x = ( eye.x + ( distance * ray.x ) ); 
 					z = ( eye.z + ( distance * ray.z ) ); 
-				    if( ( x >= xmin ) && ( x <= xmax ) && ( z >= zmin ) && ( z <= zmax ) )
-					    return distance;
+					if( ( x >= xmin ) && ( x <= xmax ) && ( z >= zmin ) && ( z <= zmax ) )
+						return distance;
 				}
 
 			}
@@ -465,7 +570,7 @@ double objIntercept( Object* object, Vector eye, Vector ray )
 				{
 					x = ( eye.x + ( distance * ray.x ) ); 
 					y = ( eye.y + ( distance * ray.y ) ); 
-				    if( ( x >= xmin ) && ( x <= xmax ) && ( y >= ymin ) && ( y <= ymax ) )	
+					if( ( x >= xmin ) && ( x <= xmax ) && ( y >= ymin ) && ( y <= ymax ) )	
 						return distance;
 				}
 			}
@@ -566,11 +671,18 @@ Vector objInterceptExit( Object* object, Vector point, Vector d )
 {
 	switch( object->type )
 	{
+		Btree *bt;
+		Vector v1, v2;
+	case TYPE_BTREE:
+		bt = (Btree *)object->data;
+		v1 = objInterceptExit( bt->left, point, d );
+		v2 = objInterceptExit( bt->right, point, d );
+		return algNorm(v1) > algNorm(v2) ? v1 : v2;
 	case TYPE_SPHERE:
 		{
 			Sphere *s = (Sphere *)object->data;
 
-			double a, b, c, delta, distance;
+			double a, b, c, delta, distance = 0;
 			//double distance = -1.0;
 
 			Vector fromSphereToEye;
@@ -603,10 +715,36 @@ Vector objInterceptExit( Object* object, Vector point, Vector d )
 	return point;
 }
 
+int do_btree_check( Object *o, Vector point )
+{
+	if (o->type == TYPE_BTREE ){
+		Btree *bt = (Btree *)o->data;
+		do_btree_check( bt->left, point );
+		do_btree_check( bt->right, point );
+	} else if (o->type == TYPE_SPHERE){
+		Sphere *s = (Sphere *)o->data;
+		Vector v = algSub( point, s->center );
+
+		if ( fabs( s->radius - algNorm( v )) < EPSILON )
+			return 1;
+		return 0;
+	}
+	return -1;
+}
 
 Vector objNormalAt( Object* object, Vector point )
 {
-	if( object->type == TYPE_SPHERE )
+	if( object->type == TYPE_BTREE )
+	{
+		Btree *bt = (Btree *)object->data;
+
+		if (do_btree_check( bt->left, point ) > 0)
+			return objNormalAt( bt->left, point );
+		if (do_btree_check( bt->right, point ) > 0)
+			return objNormalAt( bt->right, point );
+		return algVector( 0, 0, 0, 1 );
+	}
+	else if( object->type == TYPE_SPHERE )
 	{
 		Sphere *sphere = (Sphere *)object->data;
 
@@ -684,10 +822,25 @@ Vector objTextureCoordinateAt( Object* object, Vector point )
 
 int objGetMaterial( Object* object )
 {
+	if (object->type == TYPE_BTREE) {
+		int m1, m2;
+
+		Btree *bt = (Btree *) object->data;
+		m1 = objGetMaterial(bt->left);
+		m2 = objGetMaterial(bt->right);
+		return MAX(m1, m2);
+	}
 	return object->material;
 }
 
-void objDestroy( Object* object )
+void objDestroy( Object* o )
 {
-	free( object );
+	if ( o ) return;
+	if ( o->type == TYPE_BTREE ){
+		Btree *bt = o->data;
+		objDestroy( bt->left );
+		objDestroy( bt->right );
+	}
+	free( o->data );
+	free( o );
 }

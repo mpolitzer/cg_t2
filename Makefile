@@ -15,7 +15,7 @@ SRC=		\
 CC=gcc
 RM=rm
 MV=mv
-CFLAGS=-O2 -Wall `pkg-config gl --cflags` -I /usr/include/iup -ggdb
+CFLAGS=-O0 -Wall `pkg-config gl --cflags` -I /usr/include/iup -ggdb
 LIBS=-liup -liupgl -liupimglib
 
 
